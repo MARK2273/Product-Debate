@@ -29,8 +29,12 @@ function App() {
 
   // --- TTS State ---
   const [audioEnabled, setAudioEnabled] = useState(false);
-  const [speaking, setSpeaking] = useState(false);
+  const [speakingId, setSpeakingId] = useState<number | null>(null); // Index of message being spoken
   const lastMsgCount = useRef(0);
+  const [speaking, setSpeaking] = useState(false);
+
+  /* New Error State */
+  const [error, setError] = useState<string | null>(null);
 
   // --- TTS Logic ---
   useEffect(() => {
@@ -49,15 +53,16 @@ function App() {
 
     // Only speak new messages
     if (messages.length > lastMsgCount.current) {
-      const newMsg = messages[messages.length - 1];
-      speak(newMsg);
+      // Speak all new messages in sequence
+      for (let i = lastMsgCount.current; i < messages.length; i++) {
+        speak(messages[i], i);
+      }
       lastMsgCount.current = messages.length;
     }
   }, [messages, audioEnabled]);
 
-  const speak = (msg: Message) => {
-    window.speechSynthesis.cancel();
-    setSpeaking(true);
+  const speak = (msg: Message, index: number) => {
+    // REMOVED: window.speechSynthesis.cancel();  <-- This allows queuing!
 
     const utterance = new SpeechSynthesisUtterance(msg.content);
     const voices = window.speechSynthesis.getVoices();
@@ -85,8 +90,9 @@ function App() {
 
     if (voice) utterance.voice = voice;
 
-    utterance.onend = () => setSpeaking(false);
-    utterance.onerror = () => setSpeaking(false);
+    utterance.onstart = () => setSpeakingId(index);
+    utterance.onend = () => setSpeakingId(null);
+    utterance.onerror = () => setSpeakingId(null);
 
     window.speechSynthesis.speak(utterance);
   };
@@ -99,7 +105,8 @@ function App() {
     } else {
       setAudioEnabled(true);
       if (messages.length > 0) {
-        speak(messages[messages.length - 1]);
+        // Speak from last message or all? Let's just speak the very last one to resume context
+        speak(messages[messages.length - 1], messages.length - 1);
       }
     }
   };
@@ -122,6 +129,7 @@ function App() {
   };
 
   const startDebate = async () => {
+    setError(null); // Clear previous errors
     const validProducts = products.filter((p) => p.name.trim() !== "");
     if (validProducts.length < 2) {
       alert("Please enter at least 2 products.");
@@ -163,14 +171,19 @@ function App() {
       setMessages(startData.messages);
       lastMsgCount.current = startData.messages.length;
       // Manually trigger first speech since useEffect dependent on length change won't catch init
-      if (startData.messages.length > 0) speak(startData.messages[0]);
+      // Manually trigger first speech
+      if (startData.messages.length > 0) {
+        startData.messages.forEach((m: Message, i: number) => speak(m, i));
+      }
 
       setRound(startData.round);
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
       setAnalyzing(false);
       setDebating(false);
-      alert("Failed to start debate. Check backend.");
+      setError(
+        e.message || "An unexpected error occurred. Please check the backend."
+      );
     }
   };
 
@@ -192,8 +205,12 @@ function App() {
 
         setMessages((prev) => [...prev, ...data.messages]);
         setRound(data.round);
-      } catch (e) {
+      } catch (e: any) {
         console.error("Round failed", e);
+        // Don't fully crash, just stop debating
+        setDebating(false);
+        // Optional: add error message if critical, or just let user restart
+        // setError("Connection lost. Round could not complete.");
       }
     };
 
@@ -209,31 +226,33 @@ function App() {
     <div className="app-container">
       <aside className="sidebar">
         <div className="brand">
-          <span>⚖️</span> AI Product Debate
+          <span>⚡</span> DEBATE ARENA
         </div>
 
         <div className="product-form">
+          <div className="form-title">Contenders</div>
           {products.map((p, idx) => (
             <div key={p.id} className="input-group">
               <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <label>Product {idx + 1}</label>
+                <label>FIGHTER {idx + 1}</label>
                 {products.length > 2 && (
                   <button
                     className="btn-remove"
                     onClick={() => removeProduct(p.id)}
+                    title="Remove Fighter"
                   >
-                    X
+                    ×
                   </button>
                 )}
               </div>
               <input
-                placeholder="Name (e.g. iPhone 15)"
+                placeholder="Product Name (e.g. RTX 4090)"
                 value={p.name}
                 onChange={(e) => updateProduct(p.id, "name", e.target.value)}
                 disabled={debating || analyzing}
               />
               <input
-                placeholder="URL (Optional)"
+                placeholder="Reference URL (Optional)"
                 value={p.url}
                 onChange={(e) => updateProduct(p.id, "url", e.target.value)}
                 disabled={debating || analyzing}
@@ -246,35 +265,33 @@ function App() {
             onClick={addProduct}
             disabled={debating || analyzing}
           >
-            + Add Competitor
+            + ADD CONTENDER
           </button>
         </div>
 
-        <div
-          style={{
-            marginTop: "1rem",
-            padding: "0.5rem",
-            background: "#2b2c2f",
-            borderRadius: "6px",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-          }}
-        >
-          <span style={{ fontSize: "0.9rem" }}>🔊 Audio Debate</span>
+        <div className="audio-controls">
+          <span
+            style={{ fontSize: "0.9rem", fontWeight: 600, color: "#a0a0b0" }}
+          >
+            AUDIO COMMENTARY
+          </span>
           <button
             onClick={toggleAudio}
             style={{
-              background: audioEnabled ? "#10a37f" : "#555",
+              background: audioEnabled
+                ? "var(--gradient-primary)"
+                : "rgba(255,255,255,0.1)",
               border: "none",
               color: "#fff",
-              padding: "4px 8px",
-              borderRadius: "4px",
+              padding: "6px 12px",
+              borderRadius: "20px",
               fontSize: "0.8rem",
+              fontWeight: 600,
               cursor: "pointer",
+              transition: "all 0.3s",
             }}
           >
-            {audioEnabled ? (speaking ? "🗣️ Speaking" : "ON") : "OFF"}
+            {audioEnabled ? (speaking ? "🔊 LIVE" : "ON") : "MUTED"}
           </button>
         </div>
 
@@ -286,69 +303,137 @@ function App() {
           }
         >
           {analyzing
-            ? "Analyzing Data..."
+            ? "INITIALIZING..."
             : debating
-            ? "Debate in Progress..."
-            : "Start Debate"}
+            ? "DEBATE IN PROGRESS"
+            : "START SHOWDOWN"}
         </button>
       </aside>
 
       <main className="chat-area">
         <div className="messages-list">
-          {messages.length === 0 && !analyzing && (
-            <div
-              style={{
-                padding: "2rem",
-                textAlign: "center",
-                color: "#555",
-                marginTop: "20vh",
-              }}
-            >
-              <h2>Welcome to the Arena</h2>
-              <p>Add products on the left to start a debate.</p>
+          {error && (
+            <div className="welcome-msg" style={{ marginTop: "10vh" }}>
+              <div style={{ fontSize: "4rem", marginBottom: "1rem" }}>⚠️</div>
+              <h2
+                style={{
+                  color: "#ff4d4f",
+                  background: "none",
+                  WebkitTextFillColor: "initial",
+                }}
+              >
+                System Failure
+              </h2>
+              <p
+                style={{
+                  color: "#ff4d4f",
+                  maxWidth: "400px",
+                  margin: "0 auto",
+                  background: "rgba(255,0,0,0.1)",
+                  padding: "1rem",
+                  borderRadius: "8px",
+                }}
+              >
+                {error}
+              </p>
+              <button
+                onClick={() => setError(null)}
+                style={{
+                  marginTop: "2rem",
+                  background: "rgba(255,255,255,0.1)",
+                  border: "1px solid #555",
+                  color: "#fff",
+                  padding: "0.5rem 1.5rem",
+                  borderRadius: "20px",
+                }}
+              >
+                Dismiss & Retry
+              </button>
             </div>
           )}
 
-          {messages.map((msg, i) => (
-            <div
-              key={i}
-              className={`message-row ${
-                msg.sender === "Moderator" ? "moderator" : ""
-              }`}
-            >
-              <div
-                className="avatar"
-                style={{
-                  backgroundColor:
-                    msg.sender === "Moderator"
-                      ? "#ffd700"
-                      : getRandomColor(msg.sender),
-                }}
-              >
-                {msg.sender === "Moderator" ? "⚖️" : msg.sender[0]}
-              </div>
-              <div className="msg-content">
-                <div className="msg-sender">
-                  {msg.sender}{" "}
-                  <span style={{ opacity: 0.5, fontSize: "0.8em" }}>
-                    • {msg.type.toUpperCase()}
-                  </span>
-                  {audioEnabled && i === messages.length - 1 && speaking && (
-                    <span style={{ marginLeft: "10px" }}>🔊</span>
-                  )}
-                </div>
-                <div style={{ whiteSpace: "pre-wrap" }}>{msg.content}</div>
-              </div>
+          {!error && messages.length === 0 && !analyzing && (
+            <div className="welcome-msg">
+              <h2>READY TO FIGHT?</h2>
+              <p style={{ color: "#a0a0b0" }}>
+                Configure your contenders on the left and start the showdown.
+              </p>
             </div>
-          ))}
-          <div ref={scrollRef} />
+          )}
+
+          {!error &&
+            messages.map((msg, i) => {
+              const isLast = i === messages.length - 1;
+              const accentColor = getSenderColor(msg.sender);
+
+              return (
+                <div
+                  key={i}
+                  className={`message-row ${
+                    msg.sender === "Moderator" ? "moderator" : ""
+                  } ${isLast ? "active" : "history"}`}
+                  style={{
+                    // Pass dynamic color to CSS variable
+                    ["--accent-color" as any]: accentColor,
+                  }}
+                >
+                  <div
+                    className={`avatar ${speakingId === i ? "speaking" : ""}`}
+                  >
+                    {msg.sender === "Moderator" ? "⚖️" : msg.sender[0]}
+                  </div>
+                  <div className="msg-content">
+                    <div
+                      className="msg-sender"
+                      style={{
+                        color:
+                          msg.sender !== "Moderator" ? accentColor : undefined,
+                      }}
+                    >
+                      {msg.sender}
+                      {msg.type !== "statement" && (
+                        <span
+                          style={{
+                            opacity: 0.6,
+                            fontSize: "0.85em",
+                            fontWeight: 400,
+                            color: "var(--text-secondary)",
+                          }}
+                        >
+                          • {msg.type.toUpperCase()}
+                        </span>
+                      )}
+                      {audioEnabled && speakingId === i && (
+                        <span
+                          style={{ marginLeft: "10px", color: accentColor }}
+                        >
+                          🔊
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ whiteSpace: "pre-wrap" }}>{msg.content}</div>
+                  </div>
+                </div>
+              );
+            })}
+          {/* Scroll anchor with padding to clear status bar */}
+          <div ref={scrollRef} style={{ height: "100px" }} />
         </div>
 
         {(analyzing || (debating && round < 99)) && (
           <div className="status-bar">
             <div className="round-indicator">
-              {analyzing ? "Gathering Intelligence" : `Round ${round} of 5`}
-              <span className="loading-dots"></span>
+              {analyzing ? (
+                <>
+                  <span>GATHERING INTEL</span>
+                  <span className="loading-dots"></span>
+                </>
+              ) : (
+                <>
+                  <span style={{ color: "#f5576c" }}>● LIVE</span>
+                  <span>ROUND {round} / 5</span>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -357,14 +442,22 @@ function App() {
   );
 }
 
-// Helper for consistent avatar colors
-function getRandomColor(str: string) {
+// Consistent Color Helper
+const getSenderColor = (sender: string) => {
+  if (sender === "Moderator") return "#ffd700";
+  const colors = [
+    "#667eea",
+    "#f5576c",
+    "#00f260",
+    "#e100ff",
+    "#00c6ff",
+    "#f093fb",
+  ];
   let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  for (let i = 0; i < sender.length; i++) {
+    hash = sender.charCodeAt(i) + ((hash << 5) - hash);
   }
-  const c = (hash & 0x00ffffff).toString(16).toUpperCase();
-  return "#" + "00000".substring(0, 6 - c.length) + c;
-}
+  return colors[Math.abs(hash) % colors.length];
+};
 
 export default App;
