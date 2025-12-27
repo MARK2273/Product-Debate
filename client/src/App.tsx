@@ -13,7 +13,8 @@ interface Message {
   type: string;
 }
 
-const API_URL = "http://localhost:3005/api";
+// Use Env var for production, fallback to localhost for dev
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3005/api";
 
 function App() {
   const [products, setProducts] = useState<ProductInput[]>([
