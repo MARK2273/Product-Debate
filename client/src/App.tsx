@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import "./styles/index.css";
 
 interface ProductInput {
@@ -53,12 +53,6 @@ function App() {
     const loadVoices = () => {
       const all = window.speechSynthesis.getVoices();
       // Filter for decent English voices
-      const english = all.filter(
-        (v) =>
-          v.lang.startsWith("en") &&
-          !v.name.includes("Zira") &&
-          !v.name.includes("David")
-      );
       // Note: "Microsoft" voices are okay, but sometimes "Zira" is overused. Let's keep them all but prefer "Google" or "Natural".
       // Actually, let's just grab all English ones.
       const best = all.filter((v) => v.lang.startsWith("en"));
@@ -79,7 +73,6 @@ function App() {
     // Assign new voice
     let voice: SpeechSynthesisVoice | undefined;
     let pitch = 1.0;
-    let rate = 1.1;
 
     if (sender === "Moderator") {
       // Authoritative, deep, or standard voice
