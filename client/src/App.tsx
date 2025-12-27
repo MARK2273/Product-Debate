@@ -36,10 +36,32 @@ function App() {
   /* New Error State */
   const [error, setError] = useState<string | null>(null);
 
+  /* Voice Registry System */
+  const voiceRegistry = useRef<
+    Map<
+      string,
+      { voice: SpeechSynthesisUtterance["voice"]; pitch: number; rate: number }
+    >
+  >(new Map());
+  const [availableVoices, setAvailableVoices] = useState<
+    SpeechSynthesisVoice[]
+  >([]);
+
   // --- TTS Logic ---
   useEffect(() => {
     const loadVoices = () => {
-      window.speechSynthesis.getVoices();
+      const all = window.speechSynthesis.getVoices();
+      // Filter for decent English voices
+      const english = all.filter(
+        (v) =>
+          v.lang.startsWith("en") &&
+          !v.name.includes("Zira") &&
+          !v.name.includes("David")
+      );
+      // Note: "Microsoft" voices are okay, but sometimes "Zira" is overused. Let's keep them all but prefer "Google" or "Natural".
+      // Actually, let's just grab all English ones.
+      const best = all.filter((v) => v.lang.startsWith("en"));
+      setAvailableVoices(best);
     };
     loadVoices();
     window.speechSynthesis.onvoiceschanged = loadVoices;
@@ -48,50 +70,95 @@ function App() {
     };
   }, []);
 
+  const getAssignedVoice = (sender: string) => {
+    if (voiceRegistry.current.has(sender)) {
+      return voiceRegistry.current.get(sender)!;
+    }
+
+    // Assign new voice
+    let voice: SpeechSynthesisVoice | undefined;
+    let pitch = 1.0;
+    let rate = 1.1;
+
+    if (sender === "Moderator") {
+      // Authoritative, deep, or standard voice
+      voice =
+        availableVoices.find(
+          (v) =>
+            v.name.includes("Google US English") || v.name.includes("Daniel")
+        ) || availableVoices[0];
+      pitch = 0.9;
+    } else {
+      // Assign distinct voice for products
+      // Strategy: Round-robin based on map size to avoid collisions
+      const assignedCount = voiceRegistry.current.size; // includes moderator
+      // We want to skip the moderator's voice if possible, or just pick from the list index
+
+      // Filter out moderator voice if known
+      const modVoice = availableVoices.find((v) =>
+        v.name.includes("Google US English")
+      );
+      const candidates = availableVoices.filter((v) => v !== modVoice);
+
+      if (candidates.length > 0) {
+        // Pick based on how many are already assigned
+        const index = assignedCount % candidates.length;
+        voice = candidates[index];
+
+        // Add variations if we run out of unique voices
+        const loop = Math.floor(assignedCount / candidates.length);
+        if (loop > 0) {
+          pitch = 1.0 + loop * 0.2; // Shift pitch for duplicates
+        }
+      } else {
+        voice = availableVoices[0];
+        pitch = 1.0 + assignedCount * 0.1;
+      }
+    }
+
+    const config = {
+      voice: voice || null,
+      pitch,
+      rate: sender === "Moderator" ? 1.05 : 1.1,
+    };
+    voiceRegistry.current.set(sender, config);
+    return config;
+  };
+
   useEffect(() => {
     if (!audioEnabled || messages.length === 0) return;
 
-    // Only speak new messages
     if (messages.length > lastMsgCount.current) {
-      // Speak all new messages in sequence
       for (let i = lastMsgCount.current; i < messages.length; i++) {
         speak(messages[i], i);
       }
       lastMsgCount.current = messages.length;
     }
-  }, [messages, audioEnabled]);
+  }, [messages, audioEnabled, availableVoices]);
 
   const speak = (msg: Message, index: number) => {
-    // REMOVED: window.speechSynthesis.cancel();  <-- This allows queuing!
+    // Wait for voices if not loaded?
+    if (availableVoices.length === 0) return;
 
     const utterance = new SpeechSynthesisUtterance(msg.content);
-    const voices = window.speechSynthesis.getVoices();
+    const config = getAssignedVoice(msg.sender);
 
-    // Voice Strategy
-    let voice = voices.find((v) => v.lang.includes("en"));
+    if (config.voice) utterance.voice = config.voice;
+    utterance.pitch = config.pitch;
+    utterance.rate = config.rate;
+    utterance.volume = 1.0;
 
-    if (msg.sender === "Moderator") {
-      voice = voices.find((v) => v.name.includes("Google US English")) || voice;
-      utterance.pitch = 1.0;
-      utterance.rate = 1.1;
-    } else {
-      const hash = msg.sender
-        .split("")
-        .reduce((acc, c) => acc + c.charCodeAt(0), 0);
-      const available = voices.filter(
-        (v) => v.lang.includes("en") && !v.name.includes("Google US English")
-      );
-      if (available.length > 0) {
-        voice = available[hash % available.length];
-      }
-      utterance.pitch = 1.0 + (hash % 5) / 10;
-      utterance.rate = 1.2;
-    }
-
-    if (voice) utterance.voice = voice;
-
-    utterance.onstart = () => setSpeakingId(index);
-    utterance.onend = () => setSpeakingId(null);
+    utterance.onstart = () => {
+      setSpeaking(true);
+      setSpeakingId(index);
+    };
+    utterance.onend = () => {
+      // setSpeaking(false); // Don't set false immediately if queuing?
+      // Actually, for multiple queued items, this might toggle oddly.
+      // Ideally check if queue is empty, but SpeechSynthesis API is simple.
+      // We'll trust the 'speakingId' to track current item.
+      if (speakingId === index) setSpeakingId(null);
+    };
     utterance.onerror = () => setSpeakingId(null);
 
     window.speechSynthesis.speak(utterance);
@@ -104,8 +171,8 @@ function App() {
       setSpeaking(false);
     } else {
       setAudioEnabled(true);
+      // Resume logic
       if (messages.length > 0) {
-        // Speak from last message or all? Let's just speak the very last one to resume context
         speak(messages[messages.length - 1], messages.length - 1);
       }
     }
@@ -153,7 +220,12 @@ function App() {
         analyzedData.error ||
         (analyzedData.length && analyzedData[0].error)
       ) {
-        throw new Error("Analysis failed: " + JSON.stringify(analyzedData));
+        // CLEANER ERROR MESSAGE
+        const msg =
+          analyzedData.details ||
+          analyzedData.error ||
+          "AI Service Unavailable";
+        throw new Error("Analysis Issue: " + msg);
       }
 
       // 2. Start Debate (Round 1)
@@ -203,14 +275,21 @@ function App() {
         });
         const data = await res.json();
 
+        if (data.error) {
+          throw new Error(data.error);
+        }
+
+        if (!data.messages) {
+          // Graceful stop ?
+          return;
+        }
+
         setMessages((prev) => [...prev, ...data.messages]);
         setRound(data.round);
       } catch (e: any) {
         console.error("Round failed", e);
-        // Don't fully crash, just stop debating
         setDebating(false);
-        // Optional: add error message if critical, or just let user restart
-        // setError("Connection lost. Round could not complete.");
+        setError("Round interrupted: " + (e.message || "Unknown error"));
       }
     };
 

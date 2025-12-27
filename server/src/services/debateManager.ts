@@ -67,7 +67,8 @@ export class DebateManager {
     const prompt = `You are the representative for ${product.name}. 
     Product Details: ${JSON.stringify(product.details)}. 
     Competitors: ${this.products.filter(p => p.name !== product.name).map(p => p.name).join(', ')}.
-    Action: Give a short, punchy opening statement introducing your product and why it's the best. Be biased but professional.`;
+    Action: Give a short, punchy opening statement introducing your product and why it's the best. Be biased but professional.
+    CRITICAL CONSTRAINT: Write exactly ONE short paragraph (max 3 sentences). No lists. No fluff. Be high-energy.`;
     
     const text = await gemini.generateText(prompt);
     return { sender: product.name, content: text, type: 'intro' };
@@ -75,7 +76,8 @@ export class DebateManager {
 
   private async generateProsCons(product: Product): Promise<DebateMessage> {
     const prompt = `You are representing ${product.name}.
-    Action: List 3 key strengths and 1 major weakness (but frame the weakness as a trade-off or feature). Be compelling.`;
+    Action: Highlight your killer features and address one trade-off confidentally.
+    CRITICAL CONSTRAINT: Write exactly ONE short paragraph (max 4 sentences). Do NOT use bullet points. Make it flow as a powerful statement.`;
     const text = await gemini.generateText(prompt);
     return { sender: product.name, content: text, type: 'argument' };
   }
@@ -86,7 +88,8 @@ export class DebateManager {
     Debate History:
     ${context}
     
-    Action: Critically attack the claims made by your competitors in the history above. Point out flaws, pricing issues, or missing features. Be aggressive but strategic. Reference their specific claims.`;
+    Action: Critically attack the claims made by your competitors in the history above. Point out flaws, pricing issues, or missing features. Be aggressive but strategic. Reference their specific claims.
+    CRITICAL CONSTRAINT: Write exactly ONE short paragraph (max 3 sentences). Be direct and ruthless.`;
     const text = await gemini.generateText(prompt);
     return { sender: product.name, content: text, type: 'argument' };
   }
@@ -97,7 +100,8 @@ export class DebateManager {
     Debate History:
     ${context}
     
-    Action: Rebut the criticisms leveled against you in the last round. Defend your product's value. Why are the competitors wrong or nitpicking?`;
+    Action: Rebut the criticisms leveled against you in the last round. Defend your product's value. Why are the competitors wrong or nitpicking?
+    CRITICAL CONSTRAINT: Write exactly ONE short paragraph (max 3 sentences). Dismiss them effectively.`;
     const text = await gemini.generateText(prompt);
     return { sender: product.name, content: text, type: 'rebuttal' };
   }
@@ -114,7 +118,8 @@ export class DebateManager {
     1. Best Overall.
     2. Best Value (if applicable).
     3. Winner for specific use cases.
-    Be objective. Base it on the arguments presented.`;
+    Be objective. Base it on the arguments presented.
+    CRITICAL CONSTRAINT: Keep the verdict concise. Use bullet points for the 3 categories, but keep descriptions short. Max 150 words total.`;
     
     const text = await gemini.generateText(prompt);
     return { sender: 'Moderator', content: text, type: 'conclusion' };
